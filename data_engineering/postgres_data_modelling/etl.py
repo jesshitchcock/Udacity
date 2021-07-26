@@ -2,47 +2,88 @@ import os
 import glob
 import psycopg2
 import pandas as pd
+import numpy as np
 from sql_queries import *
 
+conn = psycopg2.connect("host=127.0.0.1 dbname=sparkifydb user=student password=student")
+cur = conn.cursor()
+conn.set_session(autocommit=True)
 
 def process_song_file(cur, filepath):
+    """ This function reads in Song files in json format and writes records to the "artists" and "song" tables in the Postgres Sparkifydb.
+    
+    Data Cleaning:
+    Records with the year == 0 are updated to have a missing year attribute.
+    
+    Write to: 
+    Records are written to the following tables: 
+    - artists 
+    - songs 
+    
+    Args: 
+    - cur - the cursor for the Postgres db.
+    - filepath - The path of the json song file to read.
+    """
     # open song file
-    df = 
-
-    # insert song record
-    song_data = 
-    cur.execute(song_table_insert, song_data)
+    df = pd.read_json(filepath, lines=True)
+    
+    # convert year to NaN when it is equal to 0 
+    df['year'] = df['year'].replace('0', np.nan, inplace = True)
     
     # insert artist record
-    artist_data = 
+    artist_data = artist_data = list(df[["artist_id", "artist_name", "artist_location", "artist_latitude", "artist_longitude"]].values[0])
     cur.execute(artist_table_insert, artist_data)
+    
+    # insert song record
+    song_data = list(df[["song_id", "title","artist_id", "year", "duration"]].values[0])
+    
+    cur.execute(song_table_insert, song_data)
 
 
 def process_log_file(cur, filepath):
+    """This function reads in Log files in json format and writes records to the "time", "users" and "songplays" tables in the Postgres Sparkifydb.
+    
+    Data Cleaning: 
+    - Only records with the page == "Next Song" are included. 
+    - The unix timestamp is converted to a datetime. 
+    
+    Write to: 
+    Records are written to the following tables: 
+    - time 
+    - users
+    -songplays
+    
+    Args: 
+    - cur - the cursor for the Postgres db.
+    - filepath - The path of the json log file to read.
+    """
     # open log file
-    df = 
+    df = pd.read_json(filepath, lines=True)
 
     # filter by NextSong action
-    df = 
+    df = df[df['page']=='NextSong']
 
+    # create dataframe with only ts
+    t = pd.to_datetime(df.ts, unit='ms')
+    
     # convert timestamp column to datetime
-    t = 
+    df['ts'] = pd.to_datetime(df.ts, unit='ms')
     
     # insert time data records
-    time_data = 
-    column_labels = 
-    time_df = 
+    time_data = (t, t.dt.hour, t.dt.day, t.dt.week, t.dt.month, t.dt.year, t.dt.weekday)
+    column_labels = ('timestamp', 'hour', 'day', 'week_of_year', 'month', 'year', 'weekday')
+    time_df = pd.DataFrame(dict(zip(column_labels,time_data)))
 
     for i, row in time_df.iterrows():
-        cur.execute(time_table_insert, list(row))
+        cur.execute(time_table_insert, row)
 
     # load user table
-    user_df = 
+    user_df = pd.DataFrame(df, columns = ['userId', 'firstName', 'lastName', 'gender', 'level'])
 
     # insert user records
     for i, row in user_df.iterrows():
         cur.execute(user_table_insert, row)
-
+        
     # insert songplay records
     for index, row in df.iterrows():
         
@@ -52,15 +93,24 @@ def process_log_file(cur, filepath):
         
         if results:
             songid, artistid = results
+            
         else:
             songid, artistid = None, None
 
-        # insert songplay record
-        songplay_data = 
+        #insert songplay record
+        songplay_data = (row.ts, row.userId, row.level, songid, artistid, row.sessionId, row.location, row.userAgent)
         cur.execute(songplay_table_insert, songplay_data)
 
 
 def process_data(cur, conn, filepath, func):
+    """This function executes the "process_song_file" and "process_log_file" functions to insert records into ttables in the Sparkifyb. 
+    
+    Args: 
+    - cur - the cursor for the Postgres db
+    - conn - the connection to the Sparkify db.
+    - filepath - The path of the json log file to read.
+    - the function to execute: "process_song_file" and "process_log_file"
+    """
     # get all files matching extension from directory
     all_files = []
     for root, dirs, files in os.walk(filepath):
